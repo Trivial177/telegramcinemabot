@@ -1,87 +1,107 @@
 import aiohttp
-from config import TMDB_API_KEY
+from config import KINOPOISK_API_KEY
 
-TMDB_BASE_URL = "https://api.themoviedb.org/3"
-IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
+BASE_URL = "https://kinopoiskapiunofficial.tech/api/v2.2"
 
-
-async def search_movie_by_title(title: str):
-    url = f"{TMDB_BASE_URL}/search/movie"
-
-    params = {
-        "api_key": TMDB_API_KEY,
-        "language": "ru-RU",
-        "query": title,
-        "include_adult": "false",
-        "page": 1,
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as response:
-            data = await response.json()
-
-    return data.get("results", [])
-
-
-def get_poster_url(movie: dict):
-    poster_path = movie.get("poster_path")
-
-    if not poster_path:
-        return None
-
-    return f"{IMAGE_BASE_URL}{poster_path}"
-
-import random
+HEADERS = {
+    "X-API-KEY": KINOPOISK_API_KEY,
+    "Content-Type": "application/json"
+}
 
 GENRES = {
-    "Комедия": 35,
-    "Боевик": 28,
-    "Триллер": 53,
-    "Романтика": 10749,
-    "Фэнтези": 14,
-    "Детектив": 9648,
-    "Военный": 10752,
-    "Исторический": 36,
-    "Биографический": 36,
+    "Комедия": 13,
+    "Боевик": 11,
+    "Триллер": 1,
+    "Романтика": 4,
+    "Фэнтези": 6,
+    "Детектив": 5,
+    "Военный": 14,
+    "Исторический": 15,
+    "Биографический": 22
 }
 
 
-async def get_movies_by_genre(genre_name: str):
+async def search_movie_by_title(title: str):
+    url = f"{BASE_URL}/films"
+    params = {
+        "keyword": title,
+        "type": "FILM",
+        "page": 1
+    }
+
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        async with session.get(url, params=params) as response:
+            data = await response.json()
+
+    return data.get("items", [])
+
+
+async def get_movies_by_genre(genre_name: str, page: int = 1):
     genre_id = GENRES.get(genre_name)
 
     if not genre_id:
         return []
 
-    url = f"{TMDB_BASE_URL}/discover/movie"
-
+    url = f"{BASE_URL}/films"
     params = {
-        "api_key": TMDB_API_KEY,
-        "language": "ru-RU",
-        "sort_by": "popularity.desc",
-        "with_genres": genre_id,
-        "vote_count.gte": 100,
-        "include_adult": "false",
-        "page": random.randint(1, 3),
+        "genres": genre_id,
+        "order": "NUM_VOTE",
+        "type": "FILM",
+        "ratingFrom": 6,
+        "page": page
     }
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
         async with session.get(url, params=params) as response:
             data = await response.json()
 
-    return data.get("results", [])
+    return data.get("items", [])
+
+
+async def get_movie_by_id(movie_id: int):
+    url = f"{BASE_URL}/films/{movie_id}"
+
+    async with aiohttp.ClientSession(headers=HEADERS) as session:
+        async with session.get(url) as response:
+            return await response.json()
+
+
+def get_movie_title(movie: dict):
+    return (
+        movie.get("nameRu")
+        or movie.get("nameOriginal")
+        or movie.get("nameEn")
+        or "Без названия"
+    )
+
+
+def get_movie_rating(movie: dict):
+    return (
+        movie.get("ratingKinopoisk")
+        or movie.get("ratingImdb")
+        or "Нет рейтинга"
+    )
+
+
+def get_poster_url(movie: dict):
+    return movie.get("posterUrl")
 
 
 def format_movie_info(movie: dict):
-    title = movie.get("title", "Неизвестно")
-    rating = movie.get("vote_average", "Нет рейтинга")
-    release_date = movie.get("release_date", "Неизвестно")
-    overview = movie.get("overview", "Описание отсутствует.")
+    title = get_movie_title(movie)
+    rating = get_movie_rating(movie)
+    year = movie.get("year", "Неизвестно")
+    description = movie.get("description") or movie.get("shortDescription") or "Описание отсутствует."
 
-    year = release_date[:4] if release_date else "Неизвестно"
+    genres = ", ".join(
+        genre.get("genre", "")
+        for genre in movie.get("genres", [])
+    )
 
     return (
         f"🎬 Название: {title}\n"
         f"⭐ Рейтинг: {rating}\n"
-        f"📅 Год: {year}\n\n"
-        f"📝 Описание:\n{overview}"
+        f"📅 Год: {year}\n"
+        f"🎭 Жанры: {genres}\n\n"
+        f"📝 Описание:\n{description}"
     )

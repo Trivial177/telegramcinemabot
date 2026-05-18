@@ -1,10 +1,18 @@
 from aiogram import F, Router
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 import app.keyboards as kb
 from app.ai_service import extract_movie_title, make_movie_description
-from app.movie_service import search_movie_by_title, get_poster_url, get_movies_by_genre, format_movie_info
+from app.movie_service import (
+    search_movie_by_title,
+    get_poster_url,
+    get_movies_by_genre,
+    format_movie_info,
+    get_movie_title,
+    get_movie_rating,
+    get_movie_by_id
+)
 
 router = Router()
 
@@ -38,25 +46,104 @@ async def genre_callback(callback: CallbackQuery):
     await callback.answer('Ищу фильмы по жанру...')
 
     genre = callback.data.replace('film_', '')
-
-    movies = await get_movies_by_genre(genre)
+    movies = await get_movies_by_genre(genre, page=1)
 
     if not movies:
         await callback.message.answer('Фильмы по этому жанру не найдены 😔')
         return
 
     text = f"🎬 Фильмы в жанре «{genre}»:\n\n"
+    buttons = []
 
-    for index, movie in enumerate(movies[:5], start=1):
-        title = movie.get("title", "Без названия")
-        rating = movie.get("vote_average", "Нет рейтинга")
-        year = movie.get("release_date", "Неизвестно")[:4]
+    for movie in movies[:8]:
+        movie_id = movie.get("kinopoiskId")
+        title = get_movie_title(movie)
+        rating = get_movie_rating(movie)
+        year = movie.get("year", "Неизвестно")
 
-        text += f"{index}. {title} — ⭐ {rating}, 📅 {year}\n"
+        text += f"• {title} — ⭐ {rating}, 📅 {year}\n"
 
-    text += "\nНапиши название фильма через кнопку «Найти фильм», чтобы получить описание и постер."
+        if movie_id:
+            buttons.append([
+                InlineKeyboardButton(
+                    text=title,
+                    callback_data=f"movie_{movie_id}"
+                )
+            ])
 
-    await callback.message.answer(text)
+    buttons.append([
+        InlineKeyboardButton(
+            text="➡️ Ещё фильмы",
+            callback_data=f"more_{genre}_2"
+        )
+    ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.answer(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith('more_'))
+async def more_movies(callback: CallbackQuery):
+    await callback.answer('Загружаю ещё фильмы...')
+
+    data = callback.data.replace('more_', '')
+    genre, page = data.rsplit('_', 1)
+    page = int(page)
+
+    movies = await get_movies_by_genre(genre, page=page)
+
+    if not movies:
+        await callback.message.answer('Больше фильмов не нашёл 😔')
+        return
+
+    text = f"🎬 Ещё фильмы в жанре «{genre}»:\n\n"
+    buttons = []
+
+    for movie in movies[:8]:
+        movie_id = movie.get("kinopoiskId")
+        title = get_movie_title(movie)
+        rating = get_movie_rating(movie)
+        year = movie.get("year", "Неизвестно")
+
+        text += f"• {title} — ⭐ {rating}, 📅 {year}\n"
+
+        if movie_id:
+            buttons.append([
+                InlineKeyboardButton(
+                    text=title,
+                    callback_data=f"movie_{movie_id}"
+                )
+            ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            text="➡️ Ещё фильмы",
+            callback_data=f"more_{genre}_{page + 1}"
+        )
+    ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await callback.message.answer(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data.startswith('movie_'))
+async def movie_details(callback: CallbackQuery):
+    await callback.answer('Открываю фильм...')
+
+    movie_id = int(callback.data.replace('movie_', ''))
+    movie = await get_movie_by_id(movie_id)
+
+    text = format_movie_info(movie)
+    poster = get_poster_url(movie)
+
+    if poster:
+        await callback.message.answer_photo(
+            photo=poster,
+            caption=text
+        )
+    else:
+        await callback.message.answer(text)
+
 
 @router.message(F.text == 'Найти фильм')
 async def ask_movie_title(message: Message):
